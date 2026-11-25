@@ -1,0 +1,221 @@
+package com.example.screenassistant
+
+import android.content.Context
+import android.content.Intent
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.speech.RecognitionListener
+import android.speech.RecognizerIntent
+import android.speech.SpeechRecognizer
+import android.util.Log
+import java.text.Normalizer
+import java.util.Locale
+
+class VoiceCommandManager(
+    private val context: Context,
+    private val controller: AssistantAutomationController
+) {
+    private val handler = Handler(Looper.getMainLooper())
+    private var speechRecognizer: SpeechRecognizer? = null
+    private var isListening = false
+    private var autoRestartAfterResult = false
+
+    var onVoiceStatus: ((String) -> Unit)? = null
+
+    companion object {
+        private const val TAG = "VoiceCommandManager"
+    }
+
+    fun isAvailable(): Boolean = SpeechRecognizer.isRecognitionAvailable(context)
+
+    fun startListening(keepListeningAfterCommand: Boolean = false) {
+        if (!isAvailable()) {
+            onVoiceStatus?.invoke("Thiết bị không hỗ trợ SpeechRecognizer")
+            return
+        }
+
+        autoRestartAfterResult = keepListeningAfterCommand
+        handler.post {
+            ensureRecognizer()
+            if (isListening) return@post
+
+            val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                putExtra(
+                    RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                    RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
+                )
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "vi-VN")
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "vi-VN")
+                putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+                putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
+            }
+
+            try {
+                isListening = true
+                onVoiceStatus?.invoke("Đang nghe lệnh giọng nói...")
+                speechRecognizer?.startListening(intent)
+            } catch (e: Exception) {
+                isListening = false
+                Log.e(TAG, "Lỗi khi bắt đầu nghe", e)
+                onVoiceStatus?.invoke("Không thể bật mic nhận diện")
+            }
+        }
+    }
+
+    fun stopListening() {
+        autoRestartAfterResult = false
+        handler.post {
+            isListening = false
+            try {
+                speechRecognizer?.stopListening()
+                speechRecognizer?.cancel()
+            } catch (_: Exception) {
+            }
+            onVoiceStatus?.invoke("Đã tắt mic")
+        }
+    }
+
+    fun destroy() {
+        autoRestartAfterResult = false
+        handler.removeCallbacksAndMessages(null)
+        handler.post {
+            isListening = false
+            speechRecognizer?.destroy()
+            speechRecognizer = null
+        }
+    }
+
+    private fun ensureRecognizer() {
+        if (speechRecognizer != null) return
+
+        speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context).apply {
+            setRecognitionListener(object : RecognitionListener {
+                override fun onReadyForSpeech(params: Bundle?) {
+                    onVoiceStatus?.invoke("Hãy nói lệnh (vd: 'dừng lại', 'bật nhạc')...")
+                }
+
+                override fun onBeginningOfSpeech() {
+                    onVoiceStatus?.invoke("Đang nhận giọng nói...")
+                }
+
+                override fun onRmsChanged(rmsdB: Float) = Unit
+                override fun onBufferReceived(buffer: ByteArray?) = Unit
+                override fun onEndOfSpeech() {
+                    onVoiceStatus?.invoke("Đang xử lý câu lệnh...")
+                }
+
+                override fun onError(error: Int) {
+                    isListening = false
+                    val message = mapError(error)
+                    Log.w(TAG, "SpeechRecognizer error code=$error ($message)")
+                    onVoiceStatus?.invoke(message)
+
+                    if (autoRestartAfterResult && error != SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                        handler.postDelayed({
+                            if (autoRestartAfterResult) startListening(keepListeningAfterCommand = true)
+                        }, 800L)
+                    }
+                }
+
+                override fun onResults(results: Bundle?) {
+                    isListening = false
+                    val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                    val heardText = matches?.firstOrNull()?.trim().orEmpty()
+                    if (heardText.isNotEmpty()) {
+                        onVoiceStatus?.invoke("Nghe được: \"$heardText\"")
+                        handleCommand(heardText)
+                    } else {
+                        onVoiceStatus?.invoke("Không nghe rõ")
+                    }
+
+                    if (autoRestartAfterResult) {
+                        handler.postDelayed({
+                            if (autoRestartAfterResult) startListening(keepListeningAfterCommand = true)
+                        }, 700L)
+                    }
+                }
+
+                override fun onPartialResults(partialResults: Bundle?) {
+                    val partial = partialResults
+                        ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                        ?.firstOrNull()
+                        ?.trim()
+                        .orEmpty()
+
+                    if (isStopPhrase(partial)) {
+                        controller.stopAll("Dừng bằng giọng nói: \"$partial\"")
+                    }
+                }
+
+                override fun onEvent(eventType: Int, params: Bundle?) = Unit
+            })
+        }
+    }
+
+    fun handleCommand(rawText: String) {
+        val normalized = normalizeVietnamese(rawText)
+        Log.d(TAG, "Xử lý lệnh: raw='$rawText' -> norm='$normalized'")
+
+        when {
+            isStopPhrase(normalized) -> {
+                stopListening()
+                controller.stopAll("Dừng theo lệnh voice: \"$rawText\"")
+            }
+
+            containsAny(normalized, listOf("bat nhac", "mo nhac", "phat nhac", "open music", "play music")) -> {
+                controller.openMusicAndPlay(
+                    musicPackageName = AssistantAutomationController.PKG_YOUTUBE_MUSIC
+                )
+            }
+
+            containsAny(normalized, listOf("luot tiktok", "mo tiktok", "bat tiktok", "scroll tiktok")) -> {
+                controller.startTikTokScrollLoop(
+                    dwellTimeMs = 7_000L,
+                    jitterMs = 1_500L,
+                    maxVideos = null,
+                    openAppFirst = true
+                )
+            }
+
+            containsAny(normalized, listOf("ho tro game", "choi game", "game assist")) -> {
+                controller.startGameBasicAssist()
+            }
+
+            else -> {
+                onVoiceStatus?.invoke("Chưa có hành động cho: \"$rawText\"")
+            }
+        }
+    }
+
+    private fun isStopPhrase(text: String): Boolean {
+        val norm = normalizeVietnamese(text)
+        return containsAny(norm, listOf("dung lai", "dung", "ngung", "thoi", "stop"))
+    }
+
+    private fun containsAny(text: String, keywords: List<String>): Boolean {
+        return keywords.any { kw -> text.contains(kw) }
+    }
+
+    private fun normalizeVietnamese(input: String): String {
+        val lower = input.lowercase(Locale("vi", "VN")).trim()
+        val temp = Normalizer.normalize(lower, Normalizer.Form.NFD)
+        return temp
+            .replace("\\p{InCombiningDiacriticalMarks}+".toRegex(), "")
+            .replace('đ', 'd')
+            .replace("\\s+".toRegex(), " ")
+            .trim()
+    }
+
+    private fun mapError(error: Int): String = when (error) {
+        SpeechRecognizer.ERROR_AUDIO -> "Lỗi thu âm thanh từ micro"
+        SpeechRecognizer.ERROR_CLIENT -> "Lỗi phía ứng dụng nhận diện"
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Thiếu quyền RECORD_AUDIO"
+        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "Lỗi mạng khi nhận diện giọng nói"
+        SpeechRecognizer.ERROR_NO_MATCH -> "Không nhận diện được lời nói"
+        SpeechRecognizer.ERROR_RECOGNIZER_BUSY -> "Bộ nhận diện đang bận"
+        SpeechRecognizer.ERROR_SERVER -> "Lỗi máy chủ nhận diện giọng nói"
+        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Không nghe thấy giọng nói"
+        else -> "Lỗi nhận diện khác ($error)"
+    }
+}
