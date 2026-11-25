@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:padding="20dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/tvStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingBottom="14dp"
+            android:text="Trạng thái: Chờ thao tác"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <Button
+            android:id="@+id/btnOpenAccessibility"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="1. Mở cài đặt Khả năng tiếp cận" />
+
+        <Button
+            android:id="@+id/btnToggleOverlay"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="2. Bật nút nổi (Mic / Dừng)" />
+
+        <Button
+            android:id="@+id/btnVoice"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="3. Ra lệnh giọng nói" />
+
+        <Button
+            android:id="@+id/btnPlayMusic"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="Bật nhạc &amp; bấm Phát" />
+
+        <Button
+            android:id="@+id/btnStartTikTok"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Lướt TikTok tự động" />
+
+        <Button
+            android:id="@+id/btnStop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            android:text="DỪNG MỌI TÁC VỤ" />
+    </LinearLayout>
+</ScrollView>
