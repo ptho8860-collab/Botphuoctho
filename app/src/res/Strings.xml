@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">ScreenAssistant</string>
+    <string name="accessibility_service_desc">Hỗ trợ đọc màn hình và thực hiện thao tác chạm hoặc vuốt cơ bản.</string>
+</resources>
